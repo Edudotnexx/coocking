@@ -53,6 +53,12 @@ class ConfigParser:
             
             # حذف vmess:// و decode base64
             encoded_data = config_url[8:]
+            
+            # اضافه کردن padding در صورت نیاز
+            padding = len(encoded_data) % 4
+            if padding:
+                encoded_data += '=' * (4 - padding)
+            
             decoded_data = base64.b64decode(encoded_data).decode('utf-8')
             config_data = json.loads(decoded_data)
             
@@ -125,7 +131,15 @@ class ConfigParser:
             if '@' in url_part:
                 # فرمت جدید: method:password@server:port
                 encoded_part, server_part = url_part.split('@', 1)
+                
+                # اضافه کردن padding در صورت نیاز
+                padding = len(encoded_part) % 4
+                if padding:
+                    encoded_part += '=' * (4 - padding)
+                
                 decoded = base64.b64decode(encoded_part).decode('utf-8')
+                if ':' not in decoded:
+                    raise ValueError("Invalid format: missing colon in method:password")
                 method, password = decoded.split(':', 1)
                 
                 if ':' in server_part:
@@ -134,8 +148,16 @@ class ConfigParser:
                     server, port = server_part, '8388'
             else:
                 # فرمت قدیمی: کل چیز encode شده
+                # اضافه کردن padding در صورت نیاز
+                padding = len(url_part) % 4
+                if padding:
+                    url_part += '=' * (4 - padding)
+                    
                 decoded = base64.b64decode(url_part).decode('utf-8')
-                method, password, server, port = decoded.replace('@', ':').split(':')
+                parts = decoded.replace('@', ':').split(':')
+                if len(parts) < 4:
+                    raise ValueError(f"Invalid format: expected 4 parts, got {len(parts)}")
+                method, password, server, port = parts[:4]
             
             return {
                 'name': name,
