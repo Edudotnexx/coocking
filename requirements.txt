@@ -1,0 +1,32 @@
+# کانفیگ یاب حرفه‌ای - Dependencies
+# نصب با: pip install -r requirements.txt
+
+# HTTP Client برای درخواست‌های async
+aiohttp>=3.8.0
+
+# JSON و Base64 handling (built-in در Python)
+# socket و subprocess (built-in در Python)
+
+# QR Code generation (برای آینده)
+qrcode>=7.4.2
+Pillow>=9.0.0
+
+# Data validation (اختیاری)
+pydantic>=1.10.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# CLI interface (آینده)
+click>=8.0.0
+rich>=12.0.0
+
+# Configuration management
+pyyaml>=6.0
+
+# Database (آینده)
+aiosqlite>=0.17.0
+
+# Logging
+colorlog>=6.7.0
