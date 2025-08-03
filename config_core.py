@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 کانفیگ یاب حرفه‌ای - Core Classes
-توسط: @Itsthemoein
 """
 
 import asyncio
@@ -105,14 +104,23 @@ class ConfigParser:
     
     @staticmethod
     def parse_shadowsocks(config_url: str) -> Optional[Dict]:
-        """پارس کانفیگ Shadowsocks"""
+        """پارس کانفیگ Shadowsocks با هندل کردن base64 معیوب و خطاهای دیکدینگ"""
+        import binascii
+        def safe_b64decode(s):
+            s = s.strip()
+            missing_padding = len(s) % 4
+            if missing_padding:
+                s += '=' * (4 - missing_padding)
+            try:
+                return base64.b64decode(s).decode('utf-8')
+            except (binascii.Error, UnicodeDecodeError) as e:
+                logger.error(f"Invalid base64 or decode error in Shadowsocks config: {e}")
+                return None
         try:
             if not config_url.startswith('ss://'):
                 return None
-            
             # حذف ss://
             url_without_scheme = config_url[5:]
-            
             # جدا کردن fragment (نام)
             if '#' in url_without_scheme:
                 url_part, fragment = url_without_scheme.split('#', 1)
@@ -120,23 +128,24 @@ class ConfigParser:
             else:
                 url_part = url_without_scheme
                 name = 'Unknown'
-            
             # decode base64
             if '@' in url_part:
                 # فرمت جدید: method:password@server:port
                 encoded_part, server_part = url_part.split('@', 1)
-                decoded = base64.b64decode(encoded_part).decode('utf-8')
+                decoded = safe_b64decode(encoded_part)
+                if decoded is None:
+                    return None
                 method, password = decoded.split(':', 1)
-                
                 if ':' in server_part:
                     server, port = server_part.rsplit(':', 1)
                 else:
                     server, port = server_part, '8388'
             else:
                 # فرمت قدیمی: کل چیز encode شده
-                decoded = base64.b64decode(url_part).decode('utf-8')
+                decoded = safe_b64decode(url_part)
+                if decoded is None:
+                    return None
                 method, password, server, port = decoded.replace('@', ':').split(':')
-            
             return {
                 'name': name,
                 'server': server,
