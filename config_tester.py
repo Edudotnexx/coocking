@@ -117,6 +117,15 @@ class PingTester:
             finally:
                 sock.close()
                 
+        except asyncio.TimeoutError:
+            logger.warning(f"Ping timeout for {host}:{port}")
+            return None
+        except socket.gaierror:
+            logger.warning(f"DNS resolution failed for {host}")
+            return None
+        except ConnectionRefusedError:
+            logger.warning(f"Connection refused to {host}:{port}")
+            return None
         except Exception as e:
             logger.error(f"TCP ping error for {host}:{port}: {e}")
             return None
@@ -181,7 +190,11 @@ class SpeedTester:
         try:
             connector = None
             if proxy_url:
-                connector = aiohttp.ProxyConnector.from_url(proxy_url)
+                try:
+                    connector = aiohttp.ProxyConnector.from_url(proxy_url)
+                except Exception:
+                    # اگر proxy مشکل داشت، بدون proxy ادامه بده
+                    connector = None
             
             async with aiohttp.ClientSession(
                 connector=connector,
@@ -191,12 +204,19 @@ class SpeedTester:
                 start_time = time.time()
                 
                 async with session.get(url) as response:
-                    # فقط header ها را بخوان
-                    await response.read(1)
+                    # بررسی وضعیت پاسخ
+                    if response.status >= 400:
+                        return None
+                    
+                    # خواندن محتوا تا 1024 بایت
+                    content = await response.content.read(1024)
                     end_time = time.time()
                     
                     return (end_time - start_time) * 1000  # میلی‌ثانیه
                     
+        except asyncio.TimeoutError:
+            logger.warning(f"HTTP response test timeout for {url}")
+            return None
         except Exception as e:
             logger.error(f"HTTP response test error: {e}")
             return None
