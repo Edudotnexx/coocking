@@ -1,0 +1,178 @@
+name: 🔄 Auto Update Configs
+
+on:
+  schedule:
+    # اجرا هر 6 ساعت
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # اجرای دستی
+    inputs:
+      source:
+        description: 'منبع کانفیگ (all, vmess_iran, mixed_iran, etc.)'
+        required: false
+        default: 'all'
+      test_configs:
+        description: 'تست کانفیگ‌ها بعد از دریافت'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  update-configs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🔍 Fetch Configs
+      id: fetch
+      run: |
+        echo "🚀 شروع دریافت کانفیگ‌ها..."
+        
+        # اجرای script دریافت کانفیگ
+        python scripts/fetch_configs.py --source="${{ github.event.inputs.source || 'all' }}" --output="data/configs.json"
+        
+        # ذخیره آمار
+        CONFIGS_COUNT=$(python -c "import json; data=json.load(open('data/configs.json')); print(len(data.get('configs', [])))")
+        echo "configs_count=$CONFIGS_COUNT" >> $GITHUB_OUTPUT
+        echo "✅ تعداد کانفیگ‌های دریافتی: $CONFIGS_COUNT"
+        
+    - name: 🧪 Test Configs (اختیاری)
+      if: ${{ github.event.inputs.test_configs == 'true' || github.event_name == 'schedule' }}
+      run: |
+        echo "🔬 شروع تست کانفیگ‌ها..."
+        
+        # تست محدود به 20 کانفیگ اول برای سرعت
+        python scripts/test_configs.py --input="data/configs.json" --output="data/test_results.json" --limit=20
+        
+        # آمار تست
+        python -c "
+        import json
+        data = json.load(open('data/test_results.json'))
+        stats = data.get('stats', {})
+        print(f'✅ فعال: {stats.get(\"active\", 0)}')
+        print(f'⚠️  کند: {stats.get(\"slow\", 0)}')
+        print(f'❌ غیرفعال: {stats.get(\"dead\", 0)}')
+        "
+        
+    - name: 📊 Generate Report
+      run: |
+        echo "📋 تولید گزارش..."
+        python scripts/generate_report.py --configs="data/configs.json" --tests="data/test_results.json" --output="data/report.md"
+        
+    - name: 🏷️ Create Release
+      if: success()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # تولید tag جدید
+        TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+        TAG="configs-$TIMESTAMP"
+        
+        # ایجاد release
+        gh release create "$TAG" \
+          data/configs.json \
+          data/test_results.json \
+          data/report.md \
+          --title "🔄 Auto Update - $TIMESTAMP" \
+          --notes "
+        ## 📊 آمار این بروزرسانی
+        
+        - 🔍 **تعداد کانفیگ‌ها:** ${{ steps.fetch.outputs.configs_count }}
+        - 📅 **زمان:** $(date +'%Y-%m-%d %H:%M:%S UTC')
+        - 🤖 **روش:** GitHub Actions (خودکار)
+        
+        ## 📥 دانلود
+        
+        - [configs.json](./configs.json) - تمام کانفیگ‌ها
+        - [test_results.json](./test_results.json) - نتایج تست
+        - [report.md](./report.md) - گزارش کامل
+        
+        ## 🚀 استفاده سریع
+        
+        \`\`\`bash
+        curl -O https://github.com/${{ github.repository }}/releases/download/$TAG/configs.json
+        \`\`\`
+        " \
+          --latest
+          
+    - name: 📤 Upload Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: config-update-${{ github.run_number }}
+        path: |
+          data/configs.json
+          data/test_results.json
+          data/report.md
+        retention-days: 30
+        
+    - name: 📱 Send Notification (Telegram)
+      if: always()
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          MESSAGE="✅ *کانفیگ یاب حرفه‌ای*%0A%0A🔄 بروزرسانی موفق%0A📊 تعداد کانفیگ‌ها: ${{ steps.fetch.outputs.configs_count }}%0A📅 زمان: $(date +'%Y-%m-%d %H:%M:%S')"
+        else
+          MESSAGE="❌ *کانفیگ یاب حرفه‌ای*%0A%0A🚫 خطا در بروزرسانی%0A📅 زمان: $(date +'%Y-%m-%d %H:%M:%S')"
+        fi
+        
+        if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+          curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage?chat_id=$TELEGRAM_CHAT_ID&text=$MESSAGE&parse_mode=Markdown"
+        fi
+
+  deploy-github-pages:
+    needs: update-configs
+    runs-on: ubuntu-latest
+    if: success()
+    
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📥 Download Artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: config-update-${{ github.run_number }}
+        path: ./public/data/
+        
+    - name: 🏗️ Build Static Site
+      run: |
+        # کپی فایل‌های web
+        mkdir -p public
+        cp index.html public/
+        cp app.js public/
+        cp -r assets public/ || true
+        
+        # تولید API mock برای GitHub Pages
+        python scripts/generate_static_api.py --configs="public/data/configs.json" --output="public/api/"
+        
+    - name: 📄 Setup Pages
+      uses: actions/configure-pages@v3
+      
+    - name: 🚀 Upload to Pages
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: './public'
+        
+    - name: 🌐 Deploy to Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
